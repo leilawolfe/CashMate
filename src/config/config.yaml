@@ -6,6 +6,6 @@ email_search:
 
   # List of official transaction sender emails
   senders:
-    - "alerts@capitalone.com"
-    - "online.banking@pnc.com"
-    - "auto-confirm@amazon.com"
+    - "capitalone"
+    - "pnc"
+    - "auto-confirm@amazon"
