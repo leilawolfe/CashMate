@@ -31,6 +31,7 @@ pydantic = "^2.7.0"
 # Removed the following massive and conflict-prone packages 
 # (seaborn, matplotlib, plotly, dash, google-genai, nltk, spacy, langchain)
 # We can add these back in small, controlled groups later after confirming email access works.
+dotenv = "^0.9.9"
 
 [tool.poetry.group.dev.dependencies]
 # 5. DEVELOPMENT TOOLS (Moved from main dependencies)

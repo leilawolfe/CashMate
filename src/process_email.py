@@ -1,24 +1,31 @@
 
 import os.path
+from dotenv import load_dotenv
 import pickle
 import sys
-from datetime import date, timedelta
 import re
 import sqlite3
 import base64
-from email.message import EmailMessage
 import requests
+import time
+from pathlib import Path
+
 
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from prompt import SYSTEM_PROMPT
 
+# Load .env from project root (two levels up if your script is in src/)
+ROOT = Path(__file__).resolve().parents[1]  # parent of src
+env_path = ROOT / ".env"
+load_dotenv(dotenv_path=env_path)
 
 # --- API Configuration ---
 # NOTE: The API key is left empty as required. The execution environment will provide it.
-API_KEY = ""
-GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025"
+API_KEY = os.getenv("GEMINI_API_KEY", "0")
+GEMINI_MODEL = "gemini-2.0-flash"
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={API_KEY}"
 
 # --- 1. Configuration ---
@@ -81,7 +88,7 @@ def get_gmail_service(user_id):
                 print(f"\n--- FATAL ERROR: Credentials file '{CREDENTIALS_FILE}' not found. ---")
                 return None
             except Exception as e:
-                print(f"\n--- FATAL ERROR: OAuth flow failed. Check credentials or network. ---")
+                print("\n--- FATAL ERROR: OAuth flow failed. Check credentials or network. ---")
                 print(f"Details: {e}")
                 return None
 
@@ -151,7 +158,7 @@ def get_plain_text_body(msg_part):
     Extracts the plain text body from a Gmail API message payload.
     It iterates through parts and handles MIME decoding.
     """
-    if 'parts' in msg_part['payload']:
+    if 'parts' in msg_part.get('payload', {}):
         for part in msg_part['payload']['parts']:
             # Recursively check for content in sub-parts (common for multipart/alternative)
             result = get_plain_text_body(part)
@@ -177,7 +184,7 @@ def extract_capitalone_transaction(plain_text, user_pk):
     # Group 2: Vendor (e.g., SUNPASS). We stop before the comma after the vendor.
     # Group 3: Amount (e.g., 10.00)
     pattern = re.compile(
-        r'on\s+(.+?), at\s+(.+?),.*?amount of \$(\d+\.\d{2})',
+        r'notifying you that on\s+(.+?), at\s+(.+?),.*?amount of \$(\d+\.\d{2})',
         re.IGNORECASE | re.DOTALL
     )
     
@@ -202,25 +209,22 @@ def extract_capitalone_transaction(plain_text, user_pk):
 
 # --- NEW: Gemini Categorization Function ---
 
-def get_transaction_category(vendor, amount):
+def get_transaction_category(transaction:dict):
     """
     Calls the Gemini API to categorize a transaction based on the detailed rules.
     Implements exponential backoff for retries.
     """
     max_retries = 5
     initial_delay = 1 # seconds
-    
-    # Construct the specific user query for this transaction
-    user_query = f"Merchant: {vendor}, Amount: ${amount}"
+
+    content = f"<Transaction>Merchant: {transaction['vendor']}\nAmount: ${transaction['dollar_amount']}\nDate: {transaction['date']}</Transaction>"
 
     # Construct the payload
     payload = {
-        "contents": [{ "parts": [{ "text": user_query }] }],
+        "contents": [{ "parts": [{ "text": content }] }],
         "systemInstruction": { "parts": [{ "text": SYSTEM_PROMPT }] },
         # We only expect a string response, no need for grounding or tools.
     }
-
-    print(f"-> Categorizing: {vendor} (${amount})...", end="", flush=True)
 
     for attempt in range(max_retries):
         try:
@@ -237,7 +241,6 @@ def get_transaction_category(vendor, amount):
             # Extract and clean the category string
             category = result['candidates'][0]['content']['parts'][0]['text'].strip()
             
-            print(f" Done. Category: {category}")
             return category
 
         except requests.exceptions.RequestException as e:
@@ -272,7 +275,7 @@ def process_user_inbox(service, user_pk):
         
         # Construct the Gmail API query string
         query = (
-            f"from:{CAPITALONE_SENDER} subject:\"{CAPITALONE_SUBJECT}\" is:unread"
+            f"from:{CAPITALONE_SENDER} subject:\"{CAPITALONE_SUBJECT}\""
         )
         
         # List messages matching the query
@@ -309,20 +312,12 @@ def process_user_inbox(service, user_pk):
                 
                 if transaction:
                     # --- NEW STEP: Categorize the transaction using Gemini ---
-                    vendor = transaction['vendor']
-                    amount = transaction['dollar_amount']
-                    category = get_transaction_category(vendor, amount)
+                    category = get_transaction_category(transaction)
                     transaction['category'] = category
                     
                     # 3. Save the data to SQLite
                     save_transaction(transaction)
-                    
-                    # 4. Mark the email as read after successful extraction and saving
-                    service.users().messages().modify(
-                        userId='me',
-                        id=message_id,
-                        body={'removeLabelIds': ['UNREAD']}
-                    ).execute()
+
                 else:
                     print(f"Warning: Could not extract data from message ID {message_id}. Text content not matched.")
             else:
