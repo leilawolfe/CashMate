@@ -14,7 +14,7 @@ config.*
 *.yml
 *.yaml
 .env
-.csv
+*.csv
 
 # Ignore Python cache files
 __pycache__/
