@@ -1,0 +1,33 @@
+# Ignore all JSON files
+*.json
+
+# Ignore executables
+*.exe
+
+# Ignore common config files
+config
+config.*
+*.config
+*.cfg
+*.conf
+*.ini
+*.yml
+*.yaml
+.env
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore virtual environment directories
+venv/   
+env/
+.venv/ 
+.env/
+
+# Ignore Poetry files
+poetry.lock     
+pyproject.toml
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/     
